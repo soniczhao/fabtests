@@ -1,5 +1,4 @@
 /*
- * Copyright (c) 2013-2014 Intel Corporation.  All rights reserved.
  * Copyright (c) 2014 NetApp, Inc. All rights reserved.
  *
  * This software is available to you under a choice of one of two
@@ -33,6 +32,7 @@
 
 #include <stdio.h>
 #include <stdlib.h>
+#include <stdbool.h>
 #include <string.h>
 #include <strings.h>
 #include <errno.h>
@@ -53,17 +53,27 @@
 #include <rdma/fi_errno.h>
 #include <rdma/fi_endpoint.h>
 #include <rdma/fi_cm.h>
+#include <rdma/fi_rma.h>
 #include "../common/shared.h"
 
-static int custom;
-static int size_option;
-static int iterations = 1000;
-static int transfer_size = 1000;
+#define MIN_BUF_SIZE 128
+#define BW_DOMAIN_NAME "FI_WRITE_BW"
+
+static bool custom = false;
+static bool client = false;
+static bool bidir = false;
+static bool custom_iterations = false;
+
+static int size_option = 1;
+static int iterations;
+static int transfer_size;
 static int max_credits = 128;
-static int credits = 128;
-static char test_name[10] = "custom";
+static int send_credits = 128;
+static int recv_credits = 128;
 static struct timeval start, end;
 static void *buf;
+static uint64_t rembuf;
+static uint64_t rkey;
 static size_t buffer_size;
 
 static struct fi_info hints;
@@ -80,7 +90,6 @@ static struct fid_eq *cmeq;
 static struct fid_cq *rcq, *scq;
 static struct fid_mr *mr;
 
-
 static void show_perf(void)
 {
 	char str[32];
@@ -88,31 +97,26 @@ static void show_perf(void)
 	long long bytes;
 
 	usec = (end.tv_sec - start.tv_sec) * 1000000 + (end.tv_usec - start.tv_usec);
-	bytes = (long long) iterations * transfer_size * 2;
+	bytes = (long long) iterations * transfer_size;
 
 	/* name size transfers iterations bytes seconds Gb/sec usec/xfer */
-	printf("%-10s", test_name);
 	size_str(str, sizeof str, transfer_size);
-	printf("%-8s", str);
-	cnt_str(str, sizeof str, 1);
 	printf("%-8s", str);
 	cnt_str(str, sizeof str, iterations);
 	printf("%-8s", str);
 	size_str(str, sizeof str, bytes);
 	printf("%-8s", str);
 	printf("%8.2fs%10.2f%11.2f\n",
-		usec / 1000000., (bytes * 8) / (1000. * usec),
-		(usec / iterations) / 2);
+		usec / 1000000., (bytes) / (usec),
+		(usec / iterations));
 }
 
 static void init_test(int size)
 {
-	char sstr[5];
-
-	size_str(sstr, sizeof sstr, size);
-	snprintf(test_name, sizeof test_name, "%s_lat", sstr);
 	transfer_size = size;
-	iterations = size_to_count(transfer_size);
+	if (!custom_iterations) {
+		iterations = size_to_count(transfer_size);
+	}
 }
 
 static int poll_all_sends(void)
@@ -120,24 +124,41 @@ static int poll_all_sends(void)
 	struct fi_cq_entry comp;
 	int ret;
 
-	do {
+	while (send_credits < max_credits) {
 		ret = fi_cq_read(scq, &comp, sizeof comp);
 		if (ret > 0) {
-			credits++;
+			send_credits++;
 		} else if (ret < 0) {
 			printf("Event queue read %d (%s)\n", ret, fi_strerror(-ret));
 			return ret;
 		}
-	} while (ret);
+	}
 	return 0;
 }
 
-static int send_xfer(int size)
+static int poll_all_recvs(void)
 {
 	struct fi_cq_entry comp;
 	int ret;
 
-	while (!credits) {
+	while (recv_credits < max_credits) {
+		ret = fi_cq_read(rcq, &comp, sizeof comp);
+		if (ret > 0) {
+			recv_credits++;
+		} else if (ret < 0) {
+			printf("Event queue read %d (%s)\n", ret, fi_strerror(-ret));
+			return ret;
+		}
+	}
+	return 0;
+}
+
+static int write_xfer(int size)
+{
+	struct fi_cq_entry comp;
+	int ret;
+
+	while (!send_credits) {
 		ret = fi_cq_read(scq, &comp, sizeof comp);
 		if (ret > 0) {
 			goto post;
@@ -147,7 +168,31 @@ static int send_xfer(int size)
 		}
 	}
 
-	credits--;
+	send_credits--;
+post:
+	ret = fi_write(ep, buf, (size_t) size, fi_mr_desc(mr), rembuf, rkey, NULL);
+	if (ret)
+		printf("fi_write %d (%s)\n", ret, fi_strerror(-ret));
+
+	return ret;
+}
+
+static int send_xfer(int size)
+{
+	struct fi_cq_entry comp;
+	int ret;
+
+	while (!send_credits) {
+		ret = fi_cq_read(scq, &comp, sizeof comp);
+		if (ret > 0) {
+			goto post;
+		} else if (ret < 0) {
+			printf("Event queue read %d (%s)\n", ret, fi_strerror(-ret));
+			return ret;
+		}
+	}
+
+	send_credits--;
 post:
 	ret = fi_send(ep, buf, (size_t) size, fi_mr_desc(mr), NULL);
 	if (ret)
@@ -161,14 +206,18 @@ static int recv_xfer(int size)
 	struct fi_cq_entry comp;
 	int ret;
 
-	do {
+	while (!recv_credits) {
 		ret = fi_cq_read(rcq, &comp, sizeof comp);
-		if (ret < 0) {
+		if (ret > 0) {
+			goto post;
+		} else if (ret < 0) {
 			printf("Event queue read %d (%s)\n", ret, fi_strerror(-ret));
 			return ret;
 		}
-	} while (!ret);
+	}
 
+	recv_credits--;
+post:
 	ret = fi_recv(ep, buf, buffer_size, fi_mr_desc(mr), buf);
 	if (ret)
 		printf("fi_recv %d (%s)\n", ret, fi_strerror(-ret));
@@ -178,41 +227,72 @@ static int recv_xfer(int size)
 
 static int sync_test(void)
 {
-	int ret;
+	int ret = 0;
 
-	while (credits < max_credits)
-		poll_all_sends();
+	if (client) {
+		*((uint64_t *)buf) = (uint64_t)buf;
+		*((uint64_t *)buf + 1) = fi_mr_key(mr);
+		if ((ret = send_xfer(sizeof(uint64_t)*2))) {
+			return ret;
+		}
+		if ((ret = poll_all_sends())) {
+			return ret;
+		}
+		if ((ret = recv_xfer(sizeof(uint64_t)*2))) {
+			return ret;
+		}
+		if ((ret = poll_all_recvs())) {
+			return ret;
+		}
+		rembuf = *((uint64_t *)buf);
+		rkey = *((uint64_t *)buf + 1);
+	} else {
+		if ((ret = recv_xfer(sizeof(uint64_t)*2))) {
+			return ret;
+		}
+		if ((ret = poll_all_recvs())) {
+			return ret;
+		}
+		rembuf = *((uint64_t *)buf);
+		rkey = *((uint64_t *)buf + 1);
+		*((uint64_t *)buf) = (uint64_t)buf;
+		*((uint64_t *)buf + 1) = fi_mr_key(mr);
+		if ((ret = send_xfer(sizeof(uint64_t)*2))) {
+			return ret;
+		}
+		if ((ret = poll_all_sends())) {
+			return ret;
+		}
+	}
 
-	ret = dst_addr ? send_xfer(16) : recv_xfer(16);
-	if (ret)
-		return ret;
-
-	return dst_addr ? recv_xfer(16) : send_xfer(16);
+	return ret;
 }
 
 static int run_test(void)
 {
-	int ret, i;
+	int ret = 0, i;
 
-	ret = sync_test();
-	if (ret)
+	if ((ret = sync_test())) {
 		goto out;
-
-	gettimeofday(&start, NULL);
-	for (i = 0; i < iterations; i++) {
-		ret = dst_addr ? send_xfer(transfer_size) :
-				 recv_xfer(transfer_size);
-		if (ret)
-			goto out;
-
-		ret = dst_addr ? recv_xfer(transfer_size) :
-				 send_xfer(transfer_size);
-		if (ret)
-			goto out;
 	}
-	gettimeofday(&end, NULL);
-	show_perf();
-	ret = 0;
+
+	if (bidir || client) {
+		gettimeofday(&start, NULL);
+		for (i = 0; i < iterations; i++) {
+			if ((ret = write_xfer(transfer_size))) {
+				goto out;
+			}
+		}
+		if ((ret = poll_all_sends())) {
+			goto out;
+		}
+		gettimeofday(&end, NULL);
+		show_perf();
+	}
+
+	if ((ret = sync_test())) {
+		goto out;
+	}
 
 out:
 	return ret;
@@ -251,6 +331,9 @@ static int alloc_ep_res(struct fi_info *fi)
 	int ret;
 
 	buffer_size = !custom ? test_size[TEST_CNT - 1].size : transfer_size;
+	if (buffer_size < MIN_BUF_SIZE) {
+		buffer_size = MIN_BUF_SIZE;
+	}
 	buf = malloc(buffer_size);
 	if (!buf) {
 		perror("malloc");
@@ -273,7 +356,7 @@ static int alloc_ep_res(struct fi_info *fi)
 		goto err2;
 	}
 
-	ret = fi_mr_reg(dom, buf, buffer_size, 0, 0, 0, 0, &mr, NULL);
+	ret = fi_mr_reg(dom, buf, buffer_size, FI_REMOTE_WRITE, 0, 0, 0, &mr, NULL);
 	if (ret) {
 		printf("fi_mr_reg %s\n", fi_strerror(-ret));
 		goto err3;
@@ -317,10 +400,6 @@ static int bind_ep_res(void)
 	ret = fi_enable(ep);
 	if (ret)
 		return ret;
-
-	ret = fi_recv(ep, buf, buffer_size, fi_mr_desc(mr), buf);
-	if (ret)
-		printf("fi_recv %d (%s)\n", ret, fi_strerror(-ret));
 
 	return ret;
 }
@@ -399,7 +478,7 @@ static int server_connect(void)
 	info = entry.info;
 	ret = fi_domain(fab, info->domain_attr, &dom, NULL);
 	if (ret) {
-		printf("fi_fdomain %s\n", fi_strerror(-ret));
+		printf("fi_domain %s\n", fi_strerror(-ret));
 		goto err1;
 	}
 
@@ -478,7 +557,7 @@ static int client_connect(void)
 
 	ret = fi_domain(fab, fi->domain_attr, &dom, NULL);
 	if (ret) {
-		printf("fi_fdomain %s %s\n", fi_strerror(-ret),
+		printf("fi_domain %s %s\n", fi_strerror(-ret),
 			fi->domain_attr->name);
 		goto err2;
 	}
@@ -505,7 +584,7 @@ static int client_connect(void)
 
 	rd = fi_eq_sread(cmeq, &event, &entry, sizeof entry, -1, 0);
 	if (rd != sizeof entry) {
-		printf("fi_eq_condread %zd %s\n", rd, fi_strerror((int) -rd));
+		printf("fi_eq_sread %zd %s\n", rd, fi_strerror((int) -rd));
 		return (int) rd;
 	}
 
@@ -541,16 +620,16 @@ static int run(void)
 {
 	int i, ret = 0;
 
-	if (!dst_addr) {
+	if (!client) {
 		ret = server_listen();
 		if (ret)
 			return ret;
 	}
 
-	printf("%-10s%-8s%-8s%-8s%-8s%8s %10s%13s\n",
-	       "name", "bytes", "xfers", "iters", "total", "time", "Gb/sec", "usec/xfer");
+	printf("%-8s%-8s%-8s%8s %10s%13s\n",
+	       "bytes", "iters", "total", "time", "MB/sec", "usec/xfer");
 
-	ret = dst_addr ? client_connect() : server_connect();
+	ret = client ? client_connect() : server_connect();
 	if (ret)
 		return ret;
 
@@ -559,20 +638,17 @@ static int run(void)
 			if (test_size[i].option > size_option)
 				continue;
 			init_test(test_size[i].size);
-			run_test();
+			ret = run_test();
 		}
 	} else {
 
 		ret = run_test();
 	}
 
-	while (credits < max_credits)
-		poll_all_sends();
-
 	fi_shutdown(ep, 0);
 	fi_close(&ep->fid);
 	free_ep_res();
-	if (!dst_addr)
+	if (!client)
 		free_lres();
 	fi_close(&dom->fid);
 	fi_close(&fab->fid);
@@ -583,13 +659,11 @@ int main(int argc, char **argv)
 {
 	int op, ret;
 
-	while ((op = getopt(argc, argv, "d:n:p:s:C:I:S:")) != -1) {
+	while ((op = getopt(argc, argv, "d:p:s:C:I:S:b")) != -1) {
 		switch (op) {
 		case 'd':
 			dst_addr = optarg;
-			break;
-		case 'n':
-			domain_hints.name = optarg;
+			client = true;
 			break;
 		case 'p':
 			port = optarg;
@@ -598,25 +672,30 @@ int main(int argc, char **argv)
 			src_addr = optarg;
 			break;
 		case 'I':
-			custom = 1;
+			custom_iterations = true;
 			iterations = atoi(optarg);
 			break;
 		case 'S':
 			if (!strncasecmp("all", optarg, 3)) {
 				size_option = 1;
+			} else if (!strncasecmp("ext", optarg, 3)) {
+				size_option = 2;
 			} else {
 				custom = 1;
 				transfer_size = atoi(optarg);
 			}
 			break;
+		case 'b':
+			bidir = true;
+			break;
 		default:
 			printf("usage: %s\n", argv[0]);
-			printf("\t[-d destination_address]\n");
-			printf("\t[-n domain_name]\n");
-			printf("\t[-p port_number]\n");
+			printf("\t[-d destination_address] (client only)\n");
+			printf("\t[-p port_number] (default: 9228)\n");
 			printf("\t[-s source_address]\n");
-			printf("\t[-I iterations]\n");
-			printf("\t[-S transfer_size or 'all']\n");
+			printf("\t[-I iterations] (default: dynamic)\n");
+			printf("\t[-S transfer_size or 'all' or 'ext'] (default: all)\n");
+			printf("\t[-b ] Bidirectional transfer (default: disabled)\n");
 			exit(1);
 		}
 	}
@@ -624,8 +703,9 @@ int main(int argc, char **argv)
 	hints.domain_attr = &domain_hints;
 	hints.ep_attr = &ep_hints;
 	hints.type = FI_EP_MSG;
-	hints.ep_cap = FI_MSG;
+	hints.ep_cap = FI_RMA | FI_MSG;
 	domain_hints.caps = FI_LOCAL_MR;
+	domain_hints.name = BW_DOMAIN_NAME;
 	hints.addr_format = FI_SOCKADDR;
 
 	ret = run();

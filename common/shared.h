@@ -1,9 +1,13 @@
 /*
  * Copyright (c) 2013,2014 Intel Corporation.  All rights reserved.
+ * Copyright (c) 2014 NetApp, Inc. All rights reserved.
  *
- * This software is available to you under the OpenIB.org BSD license
- * below:
- *
+ * This software is available to you under a choice of one of two
+ * licenses.  You may choose to be licensed under the terms of the GNU
+ * General Public License (GPL) Version 2, available from the file
+ * COPYING in the main directory of this source tree, or the
+ * OpenIB.org BSD license below:
+ * 
  *     Redistribution and use in source and binary forms, with or
  *     without modification, are permitted provided that the following
  *     conditions are met:
@@ -19,7 +23,7 @@
  *
  * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
  * EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
- * MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AWV
+ * MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
  * NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS
  * BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN
  * ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
@@ -39,6 +43,16 @@
 extern "C" {
 #endif
 
+struct test_size_param {
+	int size;
+	int option;
+};
+
+extern struct test_size_param test_size[];
+const unsigned int test_cnt;
+#define TEST_CNT test_cnt
+
+int bind_fid(fid_t ep, fid_t res, uint64_t flags);
 
 int getaddr(char *node, char *service, struct sockaddr **addr, socklen_t *len);
 void size_str(char *str, size_t ssize, long long size);
