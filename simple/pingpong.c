@@ -412,34 +412,39 @@ err0:
 static int server_connect(void)
 {
 	struct fi_eq_cm_entry entry;
+	enum fi_eq_event event;
+	struct fi_info *info = NULL;
+	fi_connreq_t connreq = NULL;
 	ssize_t rd;
 	int ret;
 
-	rd = fi_eq_condread(cmeq, &entry, sizeof entry, NULL, -1, 0);
+	rd = fi_eq_sread(cmeq, &event, &entry, sizeof entry, -1, 0);
 	if (rd != sizeof entry) {
-		printf("fi_eq_condread %zd %s\n", rd, fi_strerror((int) -rd));
+		printf("fi_eq_sread %zd %s\n", rd, fi_strerror((int) -rd));
 		return (int) rd;
 	}
 
-	if (entry.event != FI_CONNREQ) {
-		printf("Unexpected CM event %d\n", entry.event);
+	if (event != FI_CONNREQ) {
+		printf("Unexpected CM event %d\n", event);
 		ret = -FI_EOTHER;
 		goto err1;
 	}
 
-	ret = fi_fdomain(fab, entry.info->domain_attr, &dom, NULL);
+	info = entry.info;
+	connreq = entry.connreq;
+	ret = fi_domain(fab, info->domain_attr, &dom, NULL);
 	if (ret) {
 		printf("fi_fdomain %s\n", fi_strerror(-ret));
 		goto err1;
 	}
 
-	ret = fi_endpoint(dom, entry.info, &ep, NULL);
+	ret = fi_endpoint(dom, info, &ep, NULL);
 	if (ret) {
 		printf("fi_endpoint for req %s\n", fi_strerror(-ret));
 		goto err1;
 	}
 
-	ret = alloc_ep_res(entry.info);
+	ret = alloc_ep_res(info);
 	if (ret)
 		 goto err2;
 
@@ -447,27 +452,27 @@ static int server_connect(void)
 	if (ret)
 		goto err3;
 
-	ret = fi_accept(ep, entry.connreq, NULL, 0);
-	entry.connreq = NULL;
+	ret = fi_accept(ep, connreq, NULL, 0);
 	if (ret) {
 		printf("fi_accept %s\n", fi_strerror(-ret));
 		goto err3;
 	}
 
-	rd = fi_eq_condread(cmeq, &entry, sizeof entry, NULL, -1, 0);
+	connreq = NULL;
+	rd = fi_eq_sread(cmeq, &event, &entry, sizeof entry, -1, 0);
 	if (rd != sizeof entry) {
-		printf("fi_eq_condread %zd %s\n", rd, fi_strerror((int) -rd));
-		return (int) rd;
+		printf("fi_eq_sread %zd %s\n", rd, fi_strerror((int) -rd));
+		goto err3;
 	}
 
-	if (entry.event != FI_COMPLETE || entry.fid != &ep->fid) {
+	if (event != FI_COMPLETE || entry.fid != &ep->fid) {
 		printf("Unexpected CM event %d fid %p (ep %p)\n",
-			entry.event, entry.fid, ep);
+			event, entry.fid, ep);
 		ret = -FI_EOTHER;
-		goto err1;
+		goto err3;
 	}
 
-	fi_freeinfo(entry.info);
+	fi_freeinfo(info);
 	return 0;
 
 err3:
@@ -475,15 +480,16 @@ err3:
 err2:
 	fi_close(&ep->fid);
 err1:
-	if (entry.connreq)
-		fi_reject(pep, entry.connreq, NULL, 0);
-	fi_freeinfo(entry.info);
+	if (connreq)
+		fi_reject(pep, connreq, NULL, 0);
+	fi_freeinfo(info);
 	return ret;
 }
 
 static int client_connect(void)
 {
 	struct fi_eq_cm_entry entry;
+	enum fi_eq_event event;
 	struct fi_info *fi;
 	ssize_t rd;
 	int ret;
@@ -507,7 +513,7 @@ static int client_connect(void)
 		goto err1;
 	}
 
-	ret = fi_fdomain(fab, fi->domain_attr, &dom, NULL);
+	ret = fi_domain(fab, fi->domain_attr, &dom, NULL);
 	if (ret) {
 		printf("fi_fdomain %s %s\n", fi_strerror(-ret),
 			fi->domain_attr->name);
@@ -534,15 +540,15 @@ static int client_connect(void)
 		goto err5;
 	}
 
-	rd = fi_eq_condread(cmeq, &entry, sizeof entry, NULL, -1, 0);
+	rd = fi_eq_sread(cmeq, &event, &entry, sizeof entry, -1, 0);
 	if (rd != sizeof entry) {
 		printf("fi_eq_condread %zd %s\n", rd, fi_strerror((int) -rd));
 		return (int) rd;
 	}
 
-	if (entry.event != FI_COMPLETE || entry.fid != &ep->fid) {
+	if (event != FI_COMPLETE || entry.fid != &ep->fid) {
 		printf("Unexpected CM event %d fid %p (ep %p)\n",
-			entry.event, entry.fid, ep);
+			event, entry.fid, ep);
 		ret = -FI_EOTHER;
 		goto err1;
 	}
