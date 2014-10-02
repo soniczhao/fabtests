@@ -60,12 +60,12 @@ struct test_size_param {
 };
 
 static struct test_size_param test_size[] = {
-	{ 1 <<  1, 1 },
-	{ 1 <<  2, 1 },
-	{ 1 <<  3, 1 },
-	{ 1 <<  4, 1 },
-	{ 1 <<  5, 1 },
-	{ 1 <<  6, 1 },
+	{ 1 <<  1, 1 }, { (1 <<  1) + (1 <<  0), 2},
+	{ 1 <<  2, 1 }, { (1 <<  2) + (1 <<  1), 2},
+	{ 1 <<  3, 1 }, { (1 <<  3) + (1 <<  2), 2},
+	{ 1 <<  4, 1 }, { (1 <<  4) + (1 <<  3), 2},
+	{ 1 <<  5, 1 }, { (1 <<  5) + (1 <<  4), 2},
+	{ 1 <<  6, 1 }, { (1 <<  6) + (1 <<  5), 2},
 	{ 1 <<  7, 1 }, { (1 <<  7) + (1 <<  6), 2},
 	{ 1 <<  8, 1 }, { (1 <<  8) + (1 <<  7), 2},
 	{ 1 <<  9, 1 }, { (1 <<  9) + (1 <<  8), 2},
@@ -84,13 +84,19 @@ static struct test_size_param test_size[] = {
 	{ 1 << 22, 1 }, { (1 << 22) + (1 << 21), 2},
 	{ 1 << 23, 1 },
 };
+
 #define TEST_CNT (sizeof test_size / sizeof test_size[0])
 #define MIN_BUF_SIZE 128
+#define BW_DOMAIN_NAME "FI_WRITE_BW"
 
-static int custom;
-static int size_option;
-static int iterations = 1000;
-static int transfer_size = 1000;
+static bool custom = false;
+static bool client = false;
+static bool bidir = false;
+static bool custom_iterations = false;
+
+static int size_option = 1;
+static int iterations;
+static int transfer_size;
 static int max_credits = 128;
 static int send_credits = 128;
 static int recv_credits = 128;
@@ -105,9 +111,6 @@ static struct fi_domain_attr domain_hints;
 static struct fi_ep_attr ep_hints;
 static char *dst_addr, *src_addr;
 static char *port = "9228";
-static bool client = false;
-static bool bidir = false;
-static bool custom_iterations = false;
 
 static struct fid_fabric *fab;
 static struct fid_pep *pep;
@@ -697,14 +700,11 @@ int main(int argc, char **argv)
 {
 	int op, ret;
 
-	while ((op = getopt(argc, argv, "d:n:p:s:C:I:S:b")) != -1) {
+	while ((op = getopt(argc, argv, "d:p:s:C:I:S:b")) != -1) {
 		switch (op) {
 		case 'd':
 			dst_addr = optarg;
 			client = true;
-			break;
-		case 'n':
-			domain_hints.name = optarg;
 			break;
 		case 'p':
 			port = optarg;
@@ -719,6 +719,8 @@ int main(int argc, char **argv)
 		case 'S':
 			if (!strncasecmp("all", optarg, 3)) {
 				size_option = 1;
+			} else if (!strncasecmp("ext", optarg, 3)) {
+				size_option = 2;
 			} else {
 				custom = 1;
 				transfer_size = atoi(optarg);
@@ -729,13 +731,12 @@ int main(int argc, char **argv)
 			break;
 		default:
 			printf("usage: %s\n", argv[0]);
-			printf("\t[-d destination_address]\n");
-			printf("\t[-n domain_name]\n");
-			printf("\t[-p port_number]\n");
+			printf("\t[-d destination_address] (client only)\n");
+			printf("\t[-p port_number] (default: 9228)\n");
 			printf("\t[-s source_address]\n");
-			printf("\t[-I iterations]\n");
-			printf("\t[-S transfer_size or 'all']\n");
-			printf("\t[-b ]\n");
+			printf("\t[-I iterations] (default: dynamic)\n");
+			printf("\t[-S transfer_size or 'all' or 'ext'] (default: all)\n");
+			printf("\t[-b ] Bidirectional transfer (default: disabled)\n");
 			exit(1);
 		}
 	}
@@ -745,6 +746,7 @@ int main(int argc, char **argv)
 	hints.type = FI_EP_MSG;
 	hints.ep_cap = FI_RMA | FI_MSG;
 	domain_hints.caps = FI_LOCAL_MR;
+	domain_hints.name = BW_DOMAIN_NAME;
 	hints.addr_format = FI_SOCKADDR;
 
 	ret = run();
