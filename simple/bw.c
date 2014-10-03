@@ -56,39 +56,6 @@
 #include <rdma/fi_rma.h>
 #include "../common/shared.h"
 
-
-struct test_size_param {
-	int size;
-	int option;
-};
-
-static struct test_size_param test_size[] = {
-	{ 1 <<  1, 1 }, { (1 <<  1) + (1 <<  0), 2},
-	{ 1 <<  2, 1 }, { (1 <<  2) + (1 <<  1), 2},
-	{ 1 <<  3, 1 }, { (1 <<  3) + (1 <<  2), 2},
-	{ 1 <<  4, 1 }, { (1 <<  4) + (1 <<  3), 2},
-	{ 1 <<  5, 1 }, { (1 <<  5) + (1 <<  4), 2},
-	{ 1 <<  6, 1 }, { (1 <<  6) + (1 <<  5), 2},
-	{ 1 <<  7, 1 }, { (1 <<  7) + (1 <<  6), 2},
-	{ 1 <<  8, 1 }, { (1 <<  8) + (1 <<  7), 2},
-	{ 1 <<  9, 1 }, { (1 <<  9) + (1 <<  8), 2},
-	{ 1 << 10, 1 }, { (1 << 10) + (1 <<  9), 2},
-	{ 1 << 11, 1 }, { (1 << 11) + (1 << 10), 2},
-	{ 1 << 12, 1 }, { (1 << 12) + (1 << 11), 2},
-	{ 1 << 13, 1 }, { (1 << 13) + (1 << 12), 2},
-	{ 1 << 14, 1 }, { (1 << 14) + (1 << 13), 2},
-	{ 1 << 15, 1 }, { (1 << 15) + (1 << 14), 2},
-	{ 1 << 16, 1 }, { (1 << 16) + (1 << 15), 2},
-	{ 1 << 17, 1 }, { (1 << 17) + (1 << 16), 2},
-	{ 1 << 18, 1 }, { (1 << 18) + (1 << 17), 2},
-	{ 1 << 19, 1 }, { (1 << 19) + (1 << 18), 2},
-	{ 1 << 20, 1 }, { (1 << 20) + (1 << 19), 2},
-	{ 1 << 21, 1 }, { (1 << 21) + (1 << 20), 2},
-	{ 1 << 22, 1 }, { (1 << 22) + (1 << 21), 2},
-	{ 1 << 23, 1 },
-};
-
-#define TEST_CNT (sizeof test_size / sizeof test_size[0])
 #define MIN_BUF_SIZE 128
 #define BW_DOMAIN_NAME "FI_WRITE_BW"
 
@@ -122,7 +89,6 @@ static struct fid_ep *ep;
 static struct fid_eq *cmeq;
 static struct fid_cq *rcq, *scq;
 static struct fid_mr *mr;
-
 
 static void show_perf(void)
 {
@@ -412,16 +378,6 @@ err2:
 	fi_close(&scq->fid);
 err1:
 	free(buf);
-	return ret;
-}
-
-static int bind_fid( fid_t ep, fid_t res, uint64_t flags)
-{
-	int ret;
-
-	ret = fi_bind(ep, res, flags);
-	if (ret)
-		printf("fi_bind %s\n", fi_strerror(-ret));
 	return ret;
 }
 

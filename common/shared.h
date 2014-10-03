@@ -43,6 +43,16 @@
 extern "C" {
 #endif
 
+struct test_size_param {
+	int size;
+	int option;
+};
+
+extern struct test_size_param test_size[];
+const unsigned int test_cnt;
+#define TEST_CNT test_cnt
+
+int bind_fid(fid_t ep, fid_t res, uint64_t flags);
 
 int getaddr(char *node, char *service, struct sockaddr **addr, socklen_t *len);
 void size_str(char *str, size_t ssize, long long size);
