@@ -1,6 +1,5 @@
 /*
- * Copyright (c) 2013,2014 Intel Corporation.  All rights reserved.
- * Copyright (c) 2014 NetApp, Inc. All rights reserved.
+ * Copyright (c) 2013-2014 Intel Corporation.  All rights reserved.
  *
  * This software is available to you under a choice of one of two
  * licenses.  You may choose to be licensed under the terms of the GNU
@@ -31,37 +30,83 @@
  * SOFTWARE.
  */
 
-#ifndef _SHARED_H_
-#define _SHARED_H_
-
+#include <errno.h>
+#include <getopt.h>
+#include <netdb.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 #include <sys/socket.h>
 #include <sys/types.h>
 
 #include <rdma/fabric.h>
-
-#ifdef __cplusplus
-extern "C" {
-#endif
-
-struct test_size_param {
-	int size;
-	int option;
-};
-
-extern struct test_size_param test_size[];
-const unsigned int test_cnt;
-#define TEST_CNT test_cnt
-
-int bind_fid(fid_t ep, fid_t res, uint64_t flags);
-
-int getaddr(char *node, char *service, struct sockaddr **addr, socklen_t *len);
-void size_str(char *str, size_t ssize, long long size);
-void cnt_str(char *str, size_t ssize, long long cnt);
-int size_to_count(int size);
+#include <rdma/fi_endpoint.h>
+#include <rdma/fi_domain.h>
+#include "shared.h"
 
 
-#ifdef __cplusplus
+static struct fi_info hints, *info;
+static char *node, *port;
+
+
+static int run(void)
+{
+	struct fi_info *cur;
+	int ret;
+
+	ret = fi_getinfo(FI_VERSION(1, 0), node, port, 0, &hints, &info);
+	if (ret) {
+		printf("fi_getinfo %s\n", strerror(-ret));
+		return ret;
+	}
+
+	for (cur = info; cur; cur = cur->next)
+		printf("%s\n", fi_tostr(cur, FI_TYPE_INFO));
+
+	fi_freeinfo(info);
+	return 0;
 }
-#endif
 
-#endif /* _SHARED_H_ */
+static uint64_t ep_type(char *arg)
+{
+	if (!strcasecmp(arg, "msg"))
+		return FI_EP_MSG;
+	else if (!strcasecmp(arg, "rdm"))
+		return FI_EP_RDM;
+	else if (!strcasecmp(arg, "dgram"))
+		return FI_EP_DGRAM;
+	else
+		return FI_EP_UNSPEC;
+}
+
+int main(int argc, char **argv)
+{
+	int op, ret;
+
+	hints.caps = FI_MSG;
+	hints.mode = ~0;		/* support all modes */
+
+	while ((op = getopt(argc, argv, "e:n:p:")) != -1) {
+		switch (op) {
+		case 'e':
+			hints.ep_type = ep_type(optarg);
+			break;
+		case 'n':
+			node = optarg;
+			break;
+		case 's':
+			port = optarg;
+			break;
+		default:
+			printf("usage: %s\n", argv[0]);
+			printf("\t[-e ep_type\n");
+			printf("\t    (msg, dgram, rdm)");
+			printf("\t[-n node]\n");
+			printf("\t[-p service_port]\n");
+			exit(1);
+		}
+	}
+
+	ret = run();
+	return ret;
+}

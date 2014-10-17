@@ -170,7 +170,7 @@ err:
 static int pp_accept_ctx(struct pingpong_context *ctx)
 {
 	struct fi_eq_cm_entry entry;
-	enum fi_eq_event event;
+	uint32_t event;
 	int rc = 0;
 	int rd = 0;
 
@@ -185,7 +185,7 @@ static int pp_accept_ctx(struct pingpong_context *ctx)
 		goto err;
 	}
 
-	rc = fi_domain(ctx->fabric, entry.info->domain_attr, &ctx->dom, NULL);
+	rc = fi_domain(ctx->fabric, entry.info, &ctx->dom, NULL);
 	if (rc) {
 		FI_ERR_LOG("fi_fdomain", rc);
 		goto err;
@@ -254,11 +254,11 @@ err:
 static int pp_connect_ctx(struct pingpong_context *ctx)
 {
 	struct fi_eq_cm_entry entry;
-	enum fi_eq_event event;
+	uint32_t event;
 	int rc = 0;
 
 	/* Open domain */
-	rc = fi_domain(ctx->fabric, ctx->prov->domain_attr, &ctx->dom, NULL);
+	rc = fi_domain(ctx->fabric, ctx->prov, &ctx->dom, NULL);
 	if (rc) {
 		FI_ERR_LOG("fi_fdomain", -rc);
 		goto err;
@@ -552,13 +552,14 @@ int main(int argc, char *argv[])
 	memset(&hints, 0, sizeof(hints));
 	
 	/* Infiniband provider */
-	hints.type              = FI_EP_MSG;
-	hints.ep_cap            = FI_MSG;
-	hints.addr_format       = FI_SOCKADDR;
+	hints.ep_type = FI_EP_MSG;
+	hints.caps = FI_MSG;
+	hints.mode = FI_LOCAL_MR | FI_PROV_MR_KEY;
+	hints.addr_format = FI_SOCKADDR;
 
 	asprintf(&service, "%d", port);
 	if (!servername) {
-		hints.ep_cap |= FI_PASSIVE;
+		flags |= FI_SOURCE;
 	} else {
 		node = servername;
 	}
@@ -637,7 +638,7 @@ int main(int argc, char *argv[])
 			rd = fi_cq_sread(ctx->cq, &wc, sizeof wc, NULL, -1);
 		} else {
 			do {
-				rd = fi_cq_read(ctx->cq, &wc, sizeof wc);
+				rd = fi_cq_read(ctx->cq, &wc, 1);
 			} while (rd == 0);
 		}
 

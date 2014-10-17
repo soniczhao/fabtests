@@ -38,6 +38,7 @@
 #include <string.h>
 #include <sys/socket.h>
 #include <sys/types.h>
+<<<<<<< HEAD
 #include <rdma/fi_errno.h>
 
 #include "shared.h"
@@ -69,6 +70,9 @@ struct test_size_param test_size[] = {
 };
 
 const unsigned int test_cnt = (sizeof test_size / sizeof test_size[0]);
+=======
+#include <shared.h>
+>>>>>>> upstream/master
 
 int getaddr(char *node, char *service, struct sockaddr **addr, socklen_t *len)
 {

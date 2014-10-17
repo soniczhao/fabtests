@@ -1,5 +1,6 @@
 /*
- * Copyright (c) 2013-2014 Intel Corporation.  All rights reserved.
+ * Copyright (c) 2013,2014 Intel Corporation.  All rights reserved.
+ * Copyright (c) 2014 NetApp, Inc. All rights reserved.
  *
  * This software is available to you under a choice of one of two
  * licenses.  You may choose to be licensed under the terms of the GNU
@@ -30,69 +31,39 @@
  * SOFTWARE.
  */
 
-#include <errno.h>
-#include <getopt.h>
-#include <netdb.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
+#ifndef _SHARED_H_
+#define _SHARED_H_
+
 #include <sys/socket.h>
 #include <sys/types.h>
 
 #include <rdma/fabric.h>
-#include "shared.h"
 
+#ifdef __cplusplus
+extern "C" {
+#endif
 
-static struct fi_info hints;
-static char *dst_addr;
+struct test_size_param {
+	int size;
+	int option;
+};
 
-static int run(void)
-{
-	struct fi_info *fi, *cur;
-	int ret;
+extern struct test_size_param test_size[];
+const unsigned int test_cnt;
+#define TEST_CNT test_cnt
 
-	ret = fi_getinfo(dst_addr, NULL, &hints, &fi);
-	if (ret) {
-		printf("fi_getinfo %s\n", strerror(-ret));
-		return ret;
-	}
+int bind_fid(fid_t ep, fid_t res, uint64_t flags);
 
-	for (cur = fi; cur; cur = cur->next) {
-		printf("domain: %s\n", cur->domain_name);
-	}
+int getaddr(char *node, char *service, struct sockaddr **addr, socklen_t *len);
+void size_str(char *str, size_t ssize, long long size);
+void cnt_str(char *str, size_t ssize, long long cnt);
+int size_to_count(int size);
 
-	return ret;
+#define MIN(a,b) (((a)<(b))?(a):(b))
+#define MAX(a,b) (((a)>(b))?(a):(b))
+
+#ifdef __cplusplus
 }
+#endif
 
-int main(int argc, char **argv)
-{
-	int op, ret;
-
-	while ((op = getopt(argc, argv, "d:n:s:")) != -1) {
-		switch (op) {
-		case 'd':
-			dst_addr = optarg;
-			break;
-		case 'n':
-			hints.domain_name = optarg;
-			break;
-		case 's':
-			ret = getaddr(optarg, NULL, (struct sockaddr **) &hints.src_addr,
-				      (socklen_t *) &hints.src_addrlen);
-			if (ret) {
-				printf("source address error %s\n",
-					gai_strerror(errno));
-			}
-			break;
-		default:
-			printf("usage: %s\n", argv[0]);
-			printf("\t[-d destination_address]\n");
-			printf("\t[-n domain_name]\n");
-			printf("\t[-s source_address]\n");
-			exit(1);
-		}
-	}
-
-	ret = run();
-	return ret;
-}
+#endif /* _SHARED_H_ */
