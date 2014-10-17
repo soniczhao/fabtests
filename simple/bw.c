@@ -54,7 +54,7 @@
 #include <rdma/fi_endpoint.h>
 #include <rdma/fi_cm.h>
 #include <rdma/fi_rma.h>
-#include "../common/shared.h"
+#include <shared.h>
 
 #define MIN_BUF_SIZE 128
 #define BW_DOMAIN_NAME "FI_WRITE_BW"
@@ -409,7 +409,6 @@ static int server_listen(void)
 	struct fi_info *fi;
 	int ret;
 
-	hints.ep_cap |= FI_PASSIVE;
 	ret = fi_getinfo(FI_VERSION(1, 0), src_addr, port, 0, &hints, &fi);
 	if (ret) {
 		printf("fi_getinfo %s\n", strerror(-ret));
@@ -458,7 +457,7 @@ err0:
 static int server_connect(void)
 {
 	struct fi_eq_cm_entry entry;
-	enum fi_eq_event event;
+	uint32_t event;
 	struct fi_info *info = NULL;
 	ssize_t rd;
 	int ret;
@@ -476,7 +475,7 @@ static int server_connect(void)
 	}
 
 	info = entry.info;
-	ret = fi_domain(fab, info->domain_attr, &dom, NULL);
+	ret = fi_domain(fab, info, &dom, NULL);
 	if (ret) {
 		printf("fi_domain %s\n", fi_strerror(-ret));
 		goto err1;
@@ -531,7 +530,7 @@ err1:
 static int client_connect(void)
 {
 	struct fi_eq_cm_entry entry;
-	enum fi_eq_event event;
+	uint32_t event;
 	struct fi_info *fi;
 	ssize_t rd;
 	int ret;
@@ -555,7 +554,7 @@ static int client_connect(void)
 		goto err1;
 	}
 
-	ret = fi_domain(fab, fi->domain_attr, &dom, NULL);
+	ret = fi_domain(fab, fi, &dom, NULL);
 	if (ret) {
 		printf("fi_domain %s %s\n", fi_strerror(-ret),
 			fi->domain_attr->name);
@@ -702,9 +701,9 @@ int main(int argc, char **argv)
 
 	hints.domain_attr = &domain_hints;
 	hints.ep_attr = &ep_hints;
-	hints.type = FI_EP_MSG;
-	hints.ep_cap = FI_RMA | FI_MSG;
-	domain_hints.caps = FI_LOCAL_MR;
+	hints.ep_type = FI_EP_MSG;
+	hints.caps = FI_RMA | FI_MSG;
+	hints.mode = FI_LOCAL_MR | FI_PROV_MR_KEY;
 	domain_hints.name = BW_DOMAIN_NAME;
 	hints.addr_format = FI_SOCKADDR;
 

@@ -73,7 +73,7 @@ int main(int argc, char **argv)
 	struct fid_ep *ep;
 	struct fid_cq *rcq, *scq;
 	struct fid_mr *mr;
-	enum fi_eq_event event;
+	uint32_t event;
 	struct fi_cq_entry comp;
 
 	while ((op = getopt(argc, argv, "d:s:")) != -1) {
@@ -93,12 +93,12 @@ int main(int argc, char **argv)
 	memset(&ep_hints, 0, sizeof ep_hints);
 	hints.domain_attr = &domain_hints;
 	hints.ep_attr = &ep_hints;
-	hints.type = FI_EP_MSG;
-	hints.ep_cap = FI_MSG;
+	hints.ep_type = FI_EP_MSG;
+	hints.caps = FI_MSG;
+	hints.mode = FI_LOCAL_MR | FI_PROV_MR_KEY;
 	hints.addr_format = FI_SOCKADDR;
-	domain_hints.caps = FI_LOCAL_MR;
 	domain_hints.name = "EXP";
-	ep_hints.protocol = FI_PROTO_UNSPEC;
+	ep_hints.protocol = FI_PROTO_RDMA_CM_IB_RC;
 
 	buf = malloc(buffer_size);
 	if (!buf) {
@@ -106,8 +106,7 @@ int main(int argc, char **argv)
 	}
 
 	if (server) {
-		hints.ep_cap |= FI_PASSIVE;
-		if ((ret = fi_getinfo(FI_VERSION(1, 0), src_addr, port, 0, &hints, &info))) {
+		if ((ret = fi_getinfo(FI_VERSION(1, 0), src_addr, port, FI_SOURCE, &hints, &info))) {
 			goto exit_0;
 		}
 		if ((ret = fi_fabric(info->fabric_attr, &fab, NULL))) {
@@ -118,7 +117,7 @@ int main(int argc, char **argv)
 		}
 		fi_freeinfo(info);
 		info = NULL;
-		memset(&cm_attr, 0, sizeof cm_attr);
+		memset(&cm_attr, 0, sizeof(cm_attr));
 		cm_attr.wait_obj = FI_WAIT_FD;
 		if ((ret = fi_eq_open(fab, &cm_attr, &cmeq, NULL))) {
 			goto exit_2;
@@ -129,7 +128,7 @@ int main(int argc, char **argv)
 		if ((ret = fi_listen(pep))) {
 			goto exit_3;
 		}
-		if ((fi_eq_sread(cmeq, &event, &entry, sizeof entry, -1, 0) != sizeof entry)) {
+		if ((fi_eq_sread(cmeq, &event, &entry, sizeof(entry), -1, 0) != sizeof(entry))) {
 			ret = -FI_EOTHER;
 			goto exit_3;
 		}
@@ -139,7 +138,7 @@ int main(int argc, char **argv)
 			server_reject = true;
 			goto exit_4;
 		}
-		if ((ret = fi_domain(fab, info->domain_attr, &dom, NULL))) {
+		if ((ret = fi_domain(fab, info, &dom, NULL))) {
 			server_reject = true;
 			goto exit_4;
 		}
@@ -147,7 +146,7 @@ int main(int argc, char **argv)
 			server_reject = true;
 			goto exit_5;
 		}
-		memset(&cq_attr, 0, sizeof cq_attr);
+		memset(&cq_attr, 0, sizeof(cq_attr));
 		cq_attr.format = FI_CQ_FORMAT_CONTEXT;
 		cq_attr.wait_obj = FI_WAIT_NONE;
 		cq_attr.size = max_credits << 1;
@@ -221,7 +220,7 @@ int main(int argc, char **argv)
 		if ((ret = fi_eq_open(fab, &cm_attr, &cmeq, NULL))) {
 			goto exit_2;
 		}
-		if ((ret = fi_domain(fab, info->domain_attr, &dom, NULL))) {
+		if ((ret = fi_domain(fab, info, &dom, NULL))) {
 			goto exit_3;
 		}
 		if ((ret = fi_endpoint(dom, info, &ep, NULL))) {
@@ -269,6 +268,9 @@ int main(int argc, char **argv)
 		strncpy((char*)buf, "Marry had a little lamb, his fleece was white as snow.", buffer_size);
 		printf("Contents in buffer: %s\n", (char*)buf);
 		printf("Receving ...\n");
+		if ((ret = fi_recv(ep, buf, buffer_size, fi_mr_desc(mr), NULL))) {
+			goto exit_10;
+		}
 		while (!ret) {
 			ret = fi_cq_read(rcq, &comp, sizeof comp);
 			if (ret > 0) {
