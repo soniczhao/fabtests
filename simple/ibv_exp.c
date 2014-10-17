@@ -53,6 +53,8 @@ int main(int argc, char *argv[])
 	size_t buffer_size = 128;
 	int max_credits = 128;
 
+	struct ibv_device **dev_list = NULL;
+	struct ibv_device *ib_dev = NULL;
 	struct ibv_context *context = NULL;
 	struct rdma_event_channel *cm_channel = NULL;
 	struct rdma_cm_id *cm_id_listen = NULL;
@@ -87,26 +89,74 @@ int main(int argc, char *argv[])
 		}
 	}
 
-	buf = malloc(buffer_size);
-	cm_channel = rdma_create_event_channel();
+	if (!((buf = malloc(buffer_size)))) {
+		goto exit_0;
+	}
+	if (!((dev_list = ibv_get_device_list(NULL)))) {
+		ret = -1;
+		goto exit_0;
+	}
+	if (!((ib_dev = *dev_list))) {
+		ret = -1;
+		goto exit_0;
+	}
+	/*if (!((context = ibv_open_device(ib_dev)))) {
+		ret = -1;
+		goto exit_0;
+	}*/
+	if (!((cm_channel = rdma_create_event_channel()))) {
+		ret = -1;
+		goto exit_1;
+	}
+	printf("init ready\n");
 	if (server) {
-		rdma_create_id(cm_channel, &cm_id_listen, NULL, RDMA_PS_TCP);
+		if ((ret = rdma_create_id(cm_channel, &cm_id_listen, NULL, RDMA_PS_TCP))) {
+			goto exit_2;
+		}
+		printf("create id ready\n");
 		memset(&hints, 0, sizeof(hints));
 		hints.ai_flags = RAI_PASSIVE;
 		hints.ai_port_space = RDMA_PS_IB;
 		hints.ai_qp_type = IBV_QPT_RC;
-		rdma_getaddrinfo(src_addr, port, &hints, &res);
-		rdma_bind_addr(cm_id_listen, res->ai_src_addr);
-		rdma_listen(cm_id_listen, 0);
-		do {
-			rdma_get_cm_event(cm_channel, &event);
-		} while (event->event != RDMA_CM_EVENT_CONNECT_REQUEST);
+		if ((ret = rdma_getaddrinfo(src_addr, port, &hints, &res))) {
+			goto exit_3;
+		}
+		printf("addr info ready\n");
+		if ((ret = rdma_bind_addr(cm_id_listen, res->ai_src_addr))) {
+			goto exit_4;
+		}
+		printf("bind ready\n");
+		if ((ret = rdma_listen(cm_id_listen, 0))) {
+			goto exit_4;
+		}
+		printf("listen ready\n");
+		if (((ret = rdma_get_cm_event(cm_channel, &event))) ||
+			event->event != RDMA_CM_EVENT_CONNECT_REQUEST) {
+			goto exit_4;
+		}
+		printf("req ready\n");
 		cm_id = (struct rdma_cm_id*)(event->id);
 		context = cm_id->verbs;
-		pd = ibv_alloc_pd(context);
-		mr = ibv_reg_mr(pd, buf, buffer_size, IBV_ACCESS_LOCAL_WRITE);
-		send_cq = ibv_create_cq(context, max_credits, NULL, NULL, 0);
-		recv_cq = ibv_create_cq(context, max_credits, NULL, NULL, 0);
+		if (!((pd = ibv_alloc_pd(context)))) {
+			ret = -1;
+			goto exit_5;
+		}
+		printf("pd ready\n");
+		if (!((mr = ibv_reg_mr(pd, buf, buffer_size, IBV_ACCESS_LOCAL_WRITE)))) {
+			ret = -1;
+			goto exit_6;
+		}
+		printf("mr ready\n");
+		if (!((send_cq = ibv_create_cq(context, max_credits, NULL, NULL, 0)))) {
+			ret = -1;
+			goto exit_7;
+		}
+		printf("send cq ready\n");
+		if (!((recv_cq = ibv_create_cq(context, max_credits, NULL, NULL, 0)))) {
+			ret = -1;
+			goto exit_8;
+		}
+		printf("recv cq ready\n");
 		memset(&attr, 0, sizeof(struct ibv_qp_init_attr));
 		attr.send_cq = send_cq;
 		attr.recv_cq = recv_cq;
@@ -117,13 +167,22 @@ int main(int argc, char *argv[])
 		attr.cap.max_recv_wr = max_credits;
 		attr.cap.max_recv_sge = MAX_RECV_SGE;
 		attr.qp_type = IBV_QPT_RC;
-		rdma_create_qp(cm_id, pd, &attr);
+		if ((ret = rdma_create_qp(cm_id, pd, &attr))) {
+			goto exit_9;
+		}
 		qp = cm_id->qp;
+		printf("qp ready\n");
 		memset(&conn_param, 0, sizeof(conn_param));
 		conn_param.retry_count = 7;
 		conn_param.rnr_retry_count = 7;
-		rdma_accept(cm_id, &conn_param);
-		rdma_ack_cm_event(event);
+		if ((ret = rdma_accept(cm_id, &conn_param))) {
+			goto exit_10;
+		}
+		printf("accept ready\n");
+		if ((ret = rdma_ack_cm_event(event))) {
+			goto exit_11;
+		}
+		printf("Receving ...\n");
 		memset(&rwr, 0, sizeof(rwr));
 		memset(&recv_sgl, 0, sizeof(recv_sgl));
 		recv_sgl.addr = (uintptr_t)buf;
@@ -133,33 +192,75 @@ int main(int argc, char *argv[])
 		rwr.wr_id = 0;
 		rwr.next = NULL;
 		rwr.num_sge = 1;
-		ibv_post_recv(qp, &rwr, &bad_rwr);
+		if ((ret = ibv_post_recv(qp, &rwr, &bad_rwr))) {
+			goto exit_11;
+		}
 		memset(&wc, 0, sizeof(wc));
 		while (!ret) {
 			ret = ibv_poll_cq(recv_cq, 1, &wc);
+			if (ret > 0) {
+				printf("Receving done.\n");
+				break;
+			} else if (ret < 0) {
+				goto exit_11;
+			}
 		}
 		printf("Contents in buffer: %s\n", (char*)buf);
 	} else {
-		rdma_create_id(cm_channel, &cm_id, NULL, RDMA_PS_TCP);
+		if ((ret = rdma_create_id(cm_channel, &cm_id, NULL, RDMA_PS_TCP))) {
+			goto exit_2;
+		}
+		printf("create id ready\n");
 		memset(&hints, 0, sizeof(hints));
 		hints.ai_port_space = RDMA_PS_IB;
 		hints.ai_qp_type = IBV_QPT_RC;
-		rdma_getaddrinfo(dst_addr, port, &hints, &res);
-		rdma_resolve_addr(cm_id, NULL, res->ai_dst_addr, 2000);
-		do {
-			rdma_get_cm_event(cm_channel, &event);
-		} while (event->event != RDMA_CM_EVENT_ADDR_RESOLVED);
-		rdma_ack_cm_event(event);
-		rdma_resolve_route(cm_id, 2000);
-		do {
-			rdma_get_cm_event(cm_channel, &event);
-		} while (event->event != RDMA_CM_EVENT_ROUTE_RESOLVED);
-		rdma_ack_cm_event(event);
+		if ((ret = rdma_getaddrinfo(dst_addr, port, &hints, &res))) {
+			goto exit_3;
+		}
+		printf("addr info ready\n");
+		if ((ret = rdma_resolve_addr(cm_id, NULL, res->ai_dst_addr, 2000))) {
+			goto exit_5;
+		}
+		if (((ret = rdma_get_cm_event(cm_channel, &event))) ||
+			event->event != RDMA_CM_EVENT_ADDR_RESOLVED) {
+			goto exit_5;
+		}
+		printf("resolve addr ready\n");
+		if ((ret = rdma_ack_cm_event(event))) {
+			goto exit_5;
+		}
+		if ((ret = rdma_resolve_route(cm_id, 2000))) {
+			goto exit_5;
+		}
+		if (((ret = rdma_get_cm_event(cm_channel, &event))) ||
+			event->event != RDMA_CM_EVENT_ROUTE_RESOLVED) {
+			goto exit_5;
+		}
+		printf("resolve route ready\n");
+		if ((ret = rdma_ack_cm_event(event))) {
+			goto exit_5;
+		}
 		context = cm_id->verbs;
-		pd = ibv_alloc_pd(context);
-		mr = ibv_reg_mr(pd, buf, buffer_size, IBV_ACCESS_LOCAL_WRITE);
-		send_cq = ibv_create_cq(context, max_credits << 1, NULL, NULL, 0);
-		recv_cq = ibv_create_cq(context, max_credits << 1, NULL, NULL, 0);
+		if (!((pd = ibv_alloc_pd(context)))) {
+			ret = -1;
+			goto exit_5;
+		}
+		printf("pd ready\n");
+		if (!((mr = ibv_reg_mr(pd, buf, buffer_size, IBV_ACCESS_LOCAL_WRITE)))) {
+			ret = -1;
+			goto exit_6;
+		}
+		printf("mr ready\n");
+		if (!((send_cq = ibv_create_cq(context, max_credits << 1, NULL, NULL, 0)))) {
+			ret = -1;
+			goto exit_7;
+		}
+		printf("send cq ready\n");
+		if (!((recv_cq = ibv_create_cq(context, max_credits << 1, NULL, NULL, 0)))) {
+			ret = -1;
+			goto exit_8;
+		}
+		printf("recv cq ready\n");
 		memset(&attr, 0, sizeof(struct ibv_qp_init_attr));
 		attr.send_cq = send_cq;
 		attr.recv_cq = recv_cq;
@@ -170,17 +271,28 @@ int main(int argc, char *argv[])
 		attr.cap.max_recv_wr = max_credits;
 		attr.cap.max_recv_sge = MAX_RECV_SGE;
 		attr.qp_type = IBV_QPT_RC;
-		rdma_create_qp(cm_id, pd, &attr);
+		if ((ret = rdma_create_qp(cm_id, pd, &attr))) {
+			printf("qp error\n");
+			goto exit_9;
+		}
 		qp = cm_id->qp;
+		printf("qp ready\n");
 		memset(&conn_param, 0, sizeof(conn_param));
-		rdma_connect(cm_id, &conn_param);
-		do {
-			rdma_get_cm_event(cm_channel, &event);
-		} while (event->event != RDMA_CM_EVENT_ESTABLISHED);
-		rdma_ack_cm_event(event);
+		if ((ret = rdma_connect(cm_id, &conn_param))) {
+			goto exit_10;
+		}
+		if (((ret = rdma_get_cm_event(cm_channel, &event))) ||
+			event->event != RDMA_CM_EVENT_ESTABLISHED) {
+			goto exit_11;
+		}
+		printf("conn established ready\n");
+		if ((ret = rdma_ack_cm_event(event))) {
+			goto exit_11;
+		}
 
 		strncpy((char*)buf, "Marry had a little lamb, his fleece was white as snow.", buffer_size);
 		printf("Contents in buffer: %s\n", (char*)buf);
+		printf("Sending ...\n");
 		memset(&wr, 0, sizeof(wr));
 		memset(&send_sgl, 0, sizeof(send_sgl));
 		send_sgl.addr = (uintptr_t)buf;
@@ -192,28 +304,61 @@ int main(int argc, char *argv[])
 		wr.num_sge = 1;
 		wr.opcode = IBV_WR_SEND;
 		wr.send_flags = IBV_SEND_SIGNALED;
-		ibv_post_send(qp, &wr, &bad_wr);
+		if ((ret = ibv_post_send(qp, &wr, &bad_wr))) {
+			goto exit_11;
+		}
 		memset(&wc, 0, sizeof(wc));
 		while (!ret) {
 			ret = ibv_poll_cq(send_cq, 1, &wc);
+			if (ret > 0) {
+				printf("Sending done.\n");
+				break;
+			} else if (ret < 0) {
+				goto exit_11;
+			}
 		}
 	}
+	printf("link ready\n");
 
+exit_11:
 	rdma_disconnect(cm_id);
+exit_10:
 	ibv_destroy_qp(qp);
+	printf("destroy qp\n");
+exit_9:
 	ibv_destroy_cq(recv_cq);
+	printf("destroy recv cq\n");
+exit_8:
 	ibv_destroy_cq(send_cq);
+	printf("destroy send cq\n");
+exit_7:
 	ibv_dereg_mr(mr);
+	printf("dereg mr\n");
+exit_6:
 	ibv_dealloc_pd(pd);
+	printf("dealloc pd\n");
+exit_5:
 	rdma_destroy_id(cm_id);
+	printf("destroy id\n");
+exit_4:
 	rdma_freeaddrinfo(res);
+	printf("release res info\n");
+exit_3:
 	if (server) {
 		rdma_destroy_id(cm_id_listen);
+		printf("destroy listen id\n");
 	}
+exit_2:
 	rdma_destroy_event_channel(cm_channel);
+	printf("destroy cm channel\n");
+exit_1:
+//	ibv_close_device(context);
+	printf("close device\n");
+exit_0:
 	if (buf) {
 		free(buf);
 		buf = NULL;
+		printf("free buf\n");
 	}
 	return ret;
 }
