@@ -5,9 +5,7 @@ bin_PROGRAMS = \
 	simple/fi_pingpong \
 	simple/fi_bw \
 	simple/fi_exp \
-	simple/fi_exp_show \
 	simple/ibv_exp \
-	simple/ibv_exp_show \
 	simple/fi_write_lat \
 	simple/fi_write_bw \
 	simple/fi_read_lat \
@@ -33,14 +31,6 @@ simple_fi_exp_SOURCES = \
 simple_ibv_exp_SOURCES = \
 	simple/ibv_exp.c
 simple_ibv_exp_LDFLAGS = \
-	-lrdmacm -libverbs
-
-simple_fi_exp_show_SOURCES = \
-	simple/exp_show.c
-
-simple_ibv_exp_show_SOURCES = \
-	simple/ibv_exp_show.c
-simple_ibv_exp_show_LDFLAGS = \
 	-lrdmacm -libverbs
 
 simple_fi_write_lat_SOURCES = \
