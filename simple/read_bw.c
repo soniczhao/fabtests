@@ -122,23 +122,6 @@ static void init_test(int size)
 	iterations = size_to_count(transfer_size);
 }
 
-static int wait_for_completion(struct fid_cq *cq, int num_completions)
-{
-	int ret;
-	struct fi_cq_entry comp;
-	
-	while (num_completions > 0){
-		ret = fi_cq_read(cq, &comp, 1);
-		if (ret > 0) {
-			num_completions--;
-		} else if (ret < 0) {
-			printf("Event queue read %d (%s)\n", ret, fi_strerror(-ret));
-			return ret;
-		}
-	}
-	return 0;
-}
-
 static int send_msg(int size)
 {
 	int ret;
@@ -313,17 +296,23 @@ static int bind_ep_res(void)
 {
 	int ret;
 
-	ret = bind_fid(&ep->fid, &cmeq->fid, 0);
-	if (ret)
+	ret = fi_bind(&ep->fid, &cmeq->fid, 0);
+	if (ret) {
+		printf("fi_bind %s\n", fi_strerror(-ret));
 		return ret;
+	}
 
-	ret = bind_fid(&ep->fid, &scq->fid, FI_SEND|FI_READ);
-	if (ret)
+	ret = fi_bind(&ep->fid, &scq->fid, FI_SEND|FI_READ);
+	if (ret) {
+		printf("fi_bind %s\n", fi_strerror(-ret));
 		return ret;
+	}
 
-	ret = bind_fid(&ep->fid, &rcq->fid, FI_RECV);
-	if (ret)
+	ret = fi_bind(&ep->fid, &rcq->fid, FI_RECV);
+	if (ret) {
+		printf("fi_bind %s\n", fi_strerror(-ret));
 		return ret;
+	}
 
 	ret = fi_enable(ep);
 	if (ret)
@@ -359,9 +348,11 @@ static int server_listen(void)
 	if (ret)
 		goto err2;
 
-	ret = bind_fid(&pep->fid, &cmeq->fid, 0);
-	if (ret)
+	ret = fi_bind(&pep->fid, &cmeq->fid, 0);
+	if (ret) {
+		printf("fi_bind %s\n", fi_strerror(-ret));
 		goto err3;
+	}
 
 	ret = fi_listen(pep);
 	if (ret) {
